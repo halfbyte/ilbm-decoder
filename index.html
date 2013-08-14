@@ -1,0 +1,102 @@
+<html>
+<head>
+  <meta http-equiv="Content-type" content="text/html; charset=utf-8">
+  <title>index</title>
+  <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+  <script src="stringview.js"></script>
+  <script type="text/javascript" charset="utf-8">
+  $(function() {
+    
+    var image = {}
+    
+    function Chunk(ab, offset) {
+      this.name = new StringView(ab, 'ascii', offset, 4).toString();
+      var dataView = new DataView(ab);
+      this.size = new DataView(ab).getInt32(offset + 4, false);
+      this.body = ab.slice(offset + 8, offset + 8 + this.size);
+      return this;
+    }
+    Chunk.prototype.dataView = function() {
+      return new DataView(this.body);
+    }    
+    function parseFORM(ab) {
+      var form = new Chunk(ab, 0);
+      console.log(form.name);
+      if (form.name !== 'FORM') return null;
+      var format = new StringView(form.body, 'ascii', 0, 4).toString();
+      console.log(format);
+      
+      if (format !== 'ILBM') return false;
+      var currentOffset = 4;
+      while(currentOffset < form.size) {
+        var chunk = new Chunk(form.body, currentOffset);
+        console.log(chunk.name, chunk.size);
+        if (chunk.name === 'ANNO') {
+          console.log("ANNO: ", new StringView(chunk.body).toString());
+        } else if (chunk.name === 'BMHD') {
+          var header = chunk.dataView();
+          image.width = header.getUint16(0, false);
+          image.height = header.getUint16(2, false);
+          image.x = header.getUint16(4, false);
+          image.y = header.getUint16(6, false);
+          image.nPlanes = header.getUint8(8);
+          image.masking = header.getUint8(9);
+          image.compression = header.getUint8(10);
+          image.transparentColor = header.getUint16(12, false);
+          image.xAspect = header.getUint8(14);
+          image.yAspect = header.getUint8(15);
+          image.pageWidth = header.getUint16(16, false);
+          image.pageHeight = header.getUint16(18, false);
+        } else if (chunk.name === 'CMAP') {
+          image.colors = [];
+          var colorSize = chunk.size / 3;
+          var i;
+          var values = new Uint8Array(chunk.body, 0, chunk.size);
+          for(i=0;i<colorSize;i++) {
+            image.colors.push(
+              [values[i*3], values[i*3+1], values[i*3+2]]
+            )
+          }
+        } else if (chunk.name === 'BODY')
+        currentOffset += chunk.size + 8;
+        if (chunk.size % 2 === 1) currentOffset++;
+      }
+      console.log(image);
+      
+    }
+    
+    function parseILBM(event) {
+      console.log("loaded");
+      console.log(event.target.result);
+      parseFORM(event.target.result);
+    }
+    
+    function readILBM(file) {
+      console.log(file);
+      var reader = new FileReader();
+      reader.onload = parseILBM;
+      reader.readAsArrayBuffer(file);
+    }
+    
+    
+    $('#file').change(function(event) {
+      console.log("CHANGE")
+      if(event.target.files[0]) {
+        readILBM(event.target.files[0]);
+      }
+    });    
+  });
+  </script>
+  <style type="text/css" media="screen">
+  canvas {
+    border: 1px solid red;
+  }
+  </style>
+</head>
+<body id="index" onload="">
+  <h1>ILBM decoder</h1>
+  <p><input id="file" type="file" name="file"/></p>
+  <div><canvas id="canvas" width="800" height="600">No Canvas? Damn.</canvas></div>
+</body>
+  
+</html>
