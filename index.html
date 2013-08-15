@@ -57,18 +57,72 @@
               [values[i*3], values[i*3+1], values[i*3+2]]
             )
           }
-        } else if (chunk.name === 'BODY')
+        } else if (chunk.name === 'BODY') {
+          image.decoded = new Uint8Array(image.width * image.height);
+          var dv = chunk.dataView();
+          if (image.compression === 1) {
+            // byterun1 encoding dafuq
+            var bitsPerPixel = image.nPlanes;
+            if (image.masking == 1) bitsPerPixel++;
+            console.log("reserving", image.width * image.height / 8 * bitsPerPixel);
+            var line, plane, lines = [];
+            var offset = 0;
+            for(line=0;line<image.height;line++) {
+              lines[line] = [];
+              for(plane=0;plane<bitsPerPixel;plane++) {
+                var planeStore = new Uint8Array(image.width / 8);
+                var decodedOffset = 0;
+                while (decodedOffset < planeStore.length) {
+                  var val = dv.getInt8(offset);
+                  offset++;
+                  if (val >= 0) {
+                    for(i=0,l=val+1;i<l;i++) {                      
+                      var b = dv.getUint8(offset);
+                      offset++;
+                      planeStore[decodedOffset] = b;
+                      decodedOffset++;
+                      
+                    }
+                  } else {
+                    var b = dv.getUint8(offset);
+                    offset++;
+                    for(i=0,l=Math.abs(val)+1;i<l;i++) {
+                      planeStore[decodedOffset] = b;
+                      decodedOffset++;
+                    }                    
+                  }
+                }
+                lines[line].push(planeStore);
+              }
+            }
+            console.log(lines);
+          } else {
+            // no compression
+          }
+          var x,y;
+          console.log("convert pixels");
+          for(y=0;y<image.height;y++) {
+            for(x=0;x<image.width;x++) {
+              image.decoded[y*image.width + x] = 0;
+              for(plane=0;plane < bitsPerPixel; plane++) {
+                var bit = (lines[y][plane][Math.floor(x/8)] & (1 << (7 - (x % 8)))) >> (7 - (x % 8));
+                image.decoded[y*image.width + x] += (bit << plane);
+              }                
+            }
+          }          
+        }
         currentOffset += chunk.size + 8;
         if (chunk.size % 2 === 1) currentOffset++;
       }
       console.log(image);
-      
+      return image;
     }
     
     function parseILBM(event) {
       console.log("loaded");
       console.log(event.target.result);
-      parseFORM(event.target.result);
+      var image = parseFORM(event.target.result);
+      paintImage(image);
     }
     
     function readILBM(file) {
@@ -76,6 +130,31 @@
       var reader = new FileReader();
       reader.onload = parseILBM;
       reader.readAsArrayBuffer(file);
+    }
+    
+    function paintImage(image) {
+      var cvs = document.getElementById('canvas');
+      var c = cvs.getContext('2d');
+      var imageData = c.createImageData(image.width, image.height);
+      var setPixel = function(x, y, r, g, b, a) {
+          var index = (x + y * imageData.width) * 4;
+          imageData.data[index+0] = r;
+          imageData.data[index+1] = g;
+          imageData.data[index+2] = b;
+          imageData.data[index+3] = a;
+      };
+      var x,y;
+      for(y=0;y<image.height;y++) {
+        for(x=0;x<image.width;x++) {
+          var index = (x + y * imageData.width);
+          var colorIndex = image.decoded[index] & 127;
+          var transparency = (image.decoded[index] >> 7) > 0
+          var color = image.colors[colorIndex];
+          if (!color) console.log(colorIndex);
+          setPixel(x,y,color[0], color[1], color[2], transparency ? 0 : 255);
+        }
+      }
+      c.putImageData(imageData, 0, 0);
     }
     
     
